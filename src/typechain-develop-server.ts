@@ -133,7 +133,9 @@ async function rebuildAndDeployContracts() {
 
   const libEncodedAddresses = encodeAddressesForGenerateLib(configJson.contracts);
   console.log(blue('Regenerating lib files (for UI and derived services)...'));
-  await runShellCommand(generateLibScript.replace('<ADDRESSES>', libEncodedAddresses));
+  await runShellCommand(
+    generateLibScript.replace('<ADDRESSES>', libEncodedAddresses).replace('<NETWORK_ID>', networkId.toString()),
+  );
   console.log(green('Regenerated lib files (for UI and derived services) succesfully!'));
   console.log();
 }
