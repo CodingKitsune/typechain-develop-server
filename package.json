@@ -43,7 +43,7 @@
     "postpublish": "pinst --enable"
   },
   "peerDependencies": {
-    "ganache-cli": "^6.12.2"
+    "ganache-core": "^2.13.2"
   },
   "dependencies": {
     "chalk": "^4.1.0",
