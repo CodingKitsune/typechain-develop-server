@@ -1,7 +1,8 @@
+/* eslint-disable require-atomic-updates */
 /* eslint-disable no-console */
-import Nodemon from 'nodemon';
+import Chokidar from 'chokidar';
 import { resolve } from 'path';
-import GanacheCLI from 'ganache-cli';
+import GanacheCore from 'ganache-core';
 import { spawn, ChildProcess } from 'child_process';
 import { existsSync } from 'fs';
 import { green, blue, red, yellow } from 'chalk';
@@ -12,6 +13,8 @@ import { encodeAddressesForGenerateLib } from './encode-addresses-for-generate-l
 
 let server;
 const cwd = process.cwd();
+const processList: ChildProcess[] = [];
+console.log(blue('Starting watch proccess...'));
 
 const truffleConfingFile = resolve(
   cwd,
@@ -27,7 +30,7 @@ const truffleConfig = require(truffleConfingFile);
 const migrateNetworkName = process.env.npm_package_typechain_develop_server_truffle_migrate_network || 'development';
 if (!truffleConfig?.networks[migrateNetworkName]) {
   throw new Error(
-    `No truffle network configuration exists with the name "${migrateNetworkName}", please add one, alongside with a default port.`,
+    `No truffle network configuration exists with the name "${migrateNetworkName}", please add one, alongside with a default port and numbered ID.`,
   );
 }
 
@@ -36,6 +39,14 @@ if (!port) {
   throw new Error(`No port is set for network "${migrateNetworkName}", please add one.`);
 }
 const serverPort = parseInt(port, 10);
+
+const networkIdStr = truffleConfig?.networks[migrateNetworkName].network_id;
+const networkId = parseInt(networkIdStr, 10);
+if (!networkId || isNaN(networkId)) {
+  throw new Error(
+    `No networkId is set for network "${migrateNetworkName}", please add one (as a number, never use *).`,
+  );
+}
 
 const compileScript = process.env.npm_package_typechain_develop_server_compile_script;
 if (!compileScript) {
@@ -64,8 +75,6 @@ if (!generateLibScript) {
     `No generate lib script has been set, please add one using the package.json property "typechain-develop-server"."generate-lib-script"\nSo the server can properly generate your lib for UI use.`,
   );
 }
-
-const processList: ChildProcess[] = [];
 
 function runShellCommand(command: string): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -129,28 +138,34 @@ async function rebuildAndDeployContracts() {
   console.log();
 }
 
-console.log(blue('Starting watch proccess...'));
-
-Nodemon({
-  ext: 'sol',
-});
-
-Nodemon.on('start', async () => {
-  if (server) {
-    await new Promise(resolve => {
-      server.close(resolve);
-    });
-  }
-
-  // eslint-disable-next-line require-atomic-updates
-  server = GanacheCLI.server();
-  server.listen(serverPort);
-
-  for (const commandProcess of processList) {
-    commandProcess.kill();
-  }
-
+async function reinitializeServer() {
   try {
+    for (const commandProcess of processList) {
+      commandProcess.kill('SIGABRT');
+    }
+
+    if (server) {
+      await new Promise(resolve => {
+        server.close(resolve);
+      });
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    server = GanacheCore.server({
+      network_id: networkId,
+      port: serverPort,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.listen(serverPort, err => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
     await rebuildAndDeployContracts();
     const msg = 'All contracts have been deployed!';
     console.log(green('-'.repeat(20)));
@@ -174,4 +189,33 @@ Nodemon.on('start', async () => {
       type: 'error',
     });
   }
-});
+}
+
+function throttle(func: () => void, timeFrame: number) {
+  let lastTime = 0;
+  return () => {
+    const now = Date.now();
+    if (now - lastTime >= timeFrame) {
+      func();
+      lastTime = now;
+    }
+  };
+}
+
+let initialized = false;
+
+Chokidar.watch('**/*.sol', {
+  ignored: /node_modules/,
+})
+  .on('ready', () => {
+    reinitializeServer();
+    initialized = true;
+  })
+  .on(
+    'change',
+    throttle(() => {
+      if (initialized) {
+        reinitializeServer();
+      }
+    }, 5000),
+  );
