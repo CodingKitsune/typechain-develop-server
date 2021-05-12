@@ -156,6 +156,8 @@ async function reinitializeServer() {
     server = GanacheCore.server({
       network_id: networkId,
       port: serverPort,
+      gasLimit: 9999999,
+      ...(truffleConfig?.networks?.[migrateNetworkName]?.ganacheOptions || {}),
     });
 
     await new Promise<void>((resolve, reject) => {
